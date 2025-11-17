@@ -14,22 +14,17 @@ export default function Flights(){
   const[f,setF]=useState({number:'',destination:'',schedTime:''});
 
   /* ---------- SEED FUNCTION ---------- */
-  const seedFlights = () => {
-    const todayJet = toJet2(new Date().toISOString().slice(0, 10));
+const seedFlights = () => {
+  const todayJet = toJet2(new Date().toISOString().slice(0,10));
 
-    const demo = [
-      { number: 'LS123', destination: 'Manchester', schedTime: '06:45' },
-      { number: 'LS456', destination: 'Edinburgh',  schedTime: '08:20' },
-      { number: 'LS789', destination: 'Palma',      schedTime: '12:10' },
-    ];
+  const id1 = addFlight({ number: 'LS123', destination: 'Manchester', schedTime: '06:45', date: todayJet });
+  const id2 = addFlight({ number: 'LS456', destination: 'Edinburgh',  schedTime: '08:20', date: todayJet });
 
-    demo.forEach(f => {
-       addFlight({ ...f, date: todayJet});
-        
-       
-    });
-
-  };
+  // assign to the same id you use in the agent tab, e.g. /agent/agent1
+  // addAssignment(id1, { agentId: '', role: 'CI' });
+  // addAssignment(id2, { agentId: '', role: 'Gate' });
+  
+};
 
   const seedAssignment = () => {
 
