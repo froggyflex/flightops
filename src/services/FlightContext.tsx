@@ -17,7 +17,14 @@ export const useFlights=()=>useContext(Ctx);
 
 export const FlightProvider:React.FC<{children:React.ReactNode}>=({children})=>{
 
-  const[f,setF]=useState<Flight[]>([]);
+  const[f,setF] = useState<Flight[]>(() => {
+  try {
+    const raw = localStorage.getItem('flightops/flights');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+});
   
   
   const addFlight: Ctx['addFlight'] = (fData) => {

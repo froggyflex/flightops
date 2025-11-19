@@ -2,11 +2,14 @@ import React from'react';import ReactDOM from'react-dom/client';
 import{BrowserRouter,Routes,Route}from'react-router-dom';
 import{FlightProvider}from'./services/FlightContext';
 import AdminLayout from'./layouts/AdminLayout';
-import Dashboard from'./pages/admin/Dashboard';import Flights from'./pages/admin/Flights';
-import FlightDetail from'./pages/admin/FlightDetail';import Agents from'./pages/admin/Agents';
+import Dashboard from'./pages/admin/Dashboard';
+import Flights from'./pages/admin/Flights';
+import FlightDetail from'./pages/admin/FlightDetail';
+import Agents from'./pages/admin/Agents';
 import Reports from'./pages/admin/Reports';
 import AgentFlightDetail from'./pages/agent/AgentFlightDetail';
-import AgentLayout from'./layouts/AgentLayout';import MyShift from'./pages/agent/MyShift';
+import AgentLayout from'./layouts/AgentLayout';
+import MyShift from'./pages/agent/MyShift';
 import Login from'./pages/Login';
 import'./index.css';
 

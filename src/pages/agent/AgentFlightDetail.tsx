@@ -2,21 +2,26 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useFlights } from '../../services/FlightContext';
 import { useState, useEffect } from 'react';
+import TimeField from '../../components/TimeField';
+
 
 export default function AgentFlightDetail() {
   const { agentId, flightId } = useParams();
   const { flights, updateAgentOps } = useFlights();
   const nav = useNavigate();
 
+  
+
   const flight = flights.find(f => f.id === flightId);
   const existing = flight?.agentOps?.[agentId!] || {};
 
-  const [gateStart, setGateStart] = useState(existing.gateStart || '');
-  const [firstBus, setFirstBus]   = useState(existing.firstBus || '');
-  const [lastBus, setLastBus]     = useState(existing.lastBus || '');
-  const [walkout, setWalkout]     = useState(!!existing.walkout);
-  const [prmPickup, setPrmPickup] = useState(existing.prmPickup || '');
-  const [paxString, setPaxString] = useState(existing.paxString || '');
+  const [gateStart, setGateStart] = useState<string>(existing.gateStart || "");
+  const [gateEnd,   setGateEnd]   = useState<string>(existing.gateEnd   || "");
+  const [firstBus,  setFirstBus]  = useState<string>(existing.firstBus  || "");
+  const [lastBus,   setLastBus]   = useState<string>(existing.lastBus   || "");
+  const [walkout,   setWalkout]   = useState<boolean>(!!existing.walkout);
+  const [prmPickup, setPrmPickup] = useState<string>(existing.prmPickup || "");
+  const [paxString, setPaxString] = useState<string>(existing.paxString || "");
 
   useEffect(() => {
     if (!flight) {
@@ -62,55 +67,22 @@ export default function AgentFlightDetail() {
 
       <div className="bg-white rounded shadow p-4 flex flex-col gap-3">
 
-        <div className="flex flex-col text-sm">
-          <label className="font-semibold mb-1">Gate start</label>
-          <input
-            type="time"
-            value={gateStart}
-            onChange={e => setGateStart(e.target.value)}
-            className="border rounded p-2"
-          />
-        </div>
+        <TimeField label="Gate start" value={gateStart} onChange={setGateStart} />
 
-        <div className="flex flex-col text-sm">
-          <label className="font-semibold mb-1">First bus</label>
-          <input
-            type="time"
-            value={firstBus}
-            onChange={e => setFirstBus(e.target.value)}
-            className="border rounded p-2"
-          />
-        </div>
+        <TimeField label="Gate end" value={gateEnd} onChange={setGateEnd} />
+        {!(!gateStart || !gateEnd || gateEnd >= gateStart) && (
+          <p className="text-xs text-orange-600 -mt-2">Gate end is before gate start.</p>
+        )}
 
-        <div className="flex flex-col text-sm">
-          <label className="font-semibold mb-1">Last bus</label>
-          <input
-            type="time"
-            value={lastBus}
-            onChange={e => setLastBus(e.target.value)}
-            className="border rounded p-2"
-            disabled={walkout}
-          />
-        </div>
+        <TimeField label="First bus" value={firstBus} onChange={setFirstBus} disabled={walkout} />
+        <TimeField label="Last bus"  value={lastBus}  onChange={setLastBus}  disabled={walkout} />
 
         <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={walkout}
-            onChange={e => setWalkout(e.target.checked)}
-          />
+          <input type="checkbox" checked={walkout} onChange={e => setWalkout(e.target.checked)} />
           Walkout to aircraft (no buses)
         </label>
 
-        <div className="flex flex-col text-sm">
-          <label className="font-semibold mb-1">PRM pickup time</label>
-          <input
-            type="time"
-            value={prmPickup}
-            onChange={e => setPrmPickup(e.target.value)}
-            className="border rounded p-2"
-          />
-        </div>
+        <TimeField label="PRM pickup time" value={prmPickup} onChange={setPrmPickup} />
 
         <div className="flex flex-col text-sm">
           <label className="font-semibold mb-1">Boarded pax + infants</label>
