@@ -1,110 +1,305 @@
-// pages/agent/AgentFlightDetail.tsx
-import { useParams, useNavigate } from 'react-router-dom';
-import { useFlights } from '../../services/FlightContext';
-import { useState, useEffect } from 'react';
-import TimeField from '../../components/TimeField';
+import React, { useMemo, useState } from "react";
+import { useParams, Link } from "react-router-dom";
+import { useFlights } from "../../services/FlightContext";
+import { sendOperationalItem } from "../../services/sharepointAdapter";
+import TimeField  from "../../components/TimeField";
 
+/* ---------- local types to keep TS happy (adjust if you already export them) ---------- */
+type AgentOps = {
+  gateStart?: string;
+  gateEnd?: string;
+  firstBus?: string;
+  lastBus?: string;
+  walkout?: boolean;
+  prmPickup?: string;
+  paxString?: string;
+  paxBoarded?: number;
+  infantsBoarded?: number;
+  updatedAt?: string;
+  updatedBy?: string;
+};
+
+type Assignment = { id: string; agentId: string; role: string };
+
+type Flight = {
+  id: string;
+  number: string;
+  destination: string;
+  schedTime: string; // HH:MM
+  date: string;      // DDMMMYY (e.g., 19NOV25)
+  assignments: Assignment[];
+  agentOps?: Record<string, AgentOps>;
+  remarks?: string;
+};
+
+/* ---------- small inline modal for gate confirmation ---------- */
+function GateConfirmModal({
+  open,
+  gate,
+  onChange,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  gate: string;
+  onChange: (v: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl shadow p-5 w-[90%] max-w-sm">
+        <h3 className="text-lg font-bold text-jet2 mb-3">Confirm gate</h3>
+        <label className="text-sm block mb-2">Gate code (e.g., A5)</label>
+        <input
+          autoFocus
+          type="text"
+          value={gate}
+          onChange={(e) => onChange(e.target.value)}
+          className="border rounded w-full p-2 mb-4"
+          placeholder="Gate..."
+        />
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="px-3 py-2 rounded bg-slate-200">
+            Cancel
+          </button>
+          <button onClick={onConfirm} className="px-3 py-2 rounded bg-jet2 text-white">
+            Send
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- tiny helpers ---------- */
+const nowHHMM = () => {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+};
 
 export default function AgentFlightDetail() {
-  const { agentId, flightId } = useParams();
+  const { agentId, flightId } = useParams<{ agentId: string; flightId: string }>();
   const { flights, updateAgentOps } = useFlights();
-  const nav = useNavigate();
 
-  
+  // Find the flight
+  const flight = useMemo<Flight | undefined>(
+    () => flights.find((f: any) => String(f.id) === String(flightId)),
+    [flights, flightId]
+  );
 
-  const flight = flights.find(f => f.id === flightId);
-  const existing = flight?.agentOps?.[agentId!] || {};
+  if (!flight || !agentId) {
+    return (
+      <div className="max-w-md mx-auto p-4">
+        <p className="text-slate-600">Flight not found.</p>
+        <Link to={`/agent/${agentId || ""}`} className="text-jet2 underline">
+          ← Back to My Shift
+        </Link>
+      </div>
+    );
+  }
 
-  const [gateStart, setGateStart] = useState<string>(existing.gateStart || "");
-  const [gateEnd,   setGateEnd]   = useState<string>(existing.gateEnd   || "");
-  const [firstBus,  setFirstBus]  = useState<string>(existing.firstBus  || "");
-  const [lastBus,   setLastBus]   = useState<string>(existing.lastBus   || "");
-  const [walkout,   setWalkout]   = useState<boolean>(!!existing.walkout);
-  const [prmPickup, setPrmPickup] = useState<string>(existing.prmPickup || "");
-  const [paxString, setPaxString] = useState<string>(existing.paxString || "");
+  const seedOps: AgentOps = flight.agentOps?.[agentId] || {};
 
-  useEffect(() => {
-    if (!flight) {
-      // If flight missing (refresh, etc) 
-      nav(`/agent/${agentId}`);
+  /* ----- local form state ----- */
+  const [gateStart, setGateStart] = useState<string>(seedOps.gateStart || "");
+  const [gateEnd, setGateEnd] = useState<string>(seedOps.gateEnd || "");
+  const [firstBus, setFirstBus] = useState<string>(seedOps.firstBus || "");
+  const [lastBus, setLastBus] = useState<string>(seedOps.lastBus || "");
+  const [walkout, setWalkout] = useState<boolean>(!!seedOps.walkout);
+  const [prmPickup, setPrmPickup] = useState<string>(seedOps.prmPickup || "");
+  const [paxString, setPaxString] = useState<string>(seedOps.paxString || "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  // SharePoint push state
+  const [gate, setGate] = useState("");
+  const [showGate, setShowGate] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushOk, setPushOk] = useState<string | null>(null);
+  const [pushErr, setPushErr] = useState<string | null>(null);
+
+  const validOrder =
+    !gateStart ||
+    !gateEnd ||
+    gateStart <= gateEnd; // simple validation if both present
+
+  const onSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    try {
+      await updateAgentOps(flight.id, agentId, {
+        gateStart: gateStart || undefined,
+        gateEnd: gateEnd || undefined,
+        firstBus: walkout ? undefined : firstBus || undefined,
+        lastBus: walkout ? undefined : lastBus || undefined,
+        walkout: walkout || undefined,
+        prmPickup: prmPickup || undefined,
+        paxString: paxString || undefined,
+        updatedAt: new Date().toISOString(),
+        updatedBy: agentId,
+      } as Partial<AgentOps>);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1600);
+    } finally {
+      setSaving(false);
     }
-  }, [flight, agentId, nav]);
-
-  if (!flight) return null;
-
-  const parsePax = (value: string) => {
-    const match = value.match(/^(\d+)\s*\+\s*(\d+)$/);
-    if (!match) return { paxBoarded: undefined, infantsBoarded: undefined };
-    return {
-      paxBoarded: Number(match[1]),
-      infantsBoarded: Number(match[2]),
-    };
   };
 
-  const onSave = () => {
-    const { paxBoarded, infantsBoarded } = parsePax(paxString);
-    updateAgentOps(flight.id, agentId!, {
-      gateStart: gateStart || undefined,
-      firstBus: firstBus || undefined,
-      lastBus: lastBus || undefined,
-      walkout,
-      prmPickup: prmPickup || undefined,
-      paxString: paxString || undefined,
-      paxBoarded,
-      infantsBoarded,
-    });
-    nav(`/agent/${agentId}`, { state: { highlightId: flight.id } }); // go back to MyShift
+  // Build the comment string as requested
+  const commentString = [
+    `Gate ${gate || "—"}`,
+    `start: ${gateStart || "—"}`,
+    `end: ${gateEnd || "—"}`,
+    `first bus: ${firstBus || (walkout ? "walkout" : "—")}`,
+    `last bus: ${lastBus || (walkout ? "walkout" : "—")}`,
+    `prm: ${prmPickup || "—"}`,
+  ].join(", ");
+
+  const onClickSend = () => {
+    setPushErr(null);
+    setShowGate(true);
   };
+
+  const confirmSend = async () => {
+    setShowGate(false);
+    setPushBusy(true);
+    setPushOk(null);
+    setPushErr(null);
+    try {
+      await sendOperationalItem({
+        fileId: (import.meta as any).env.VITE_GRAPH_FILE_ID, // set in env when you get access
+        agentId,
+        flight: {
+          id: flight.id,
+          number: flight.number,
+          destination: flight.destination,
+          schedTime: flight.schedTime,
+          date: flight.date,
+          remarks: flight.remarks,
+        },
+        ops: { gateStart, gateEnd, firstBus, lastBus, walkout, prmPickup, paxString },
+        gate,
+        remarks: (flight.remarks || "").trim() || undefined,
+      });
+
+      setPushOk("Sent to SharePoint ✓");
+      setTimeout(() => setPushOk(null), 2500);
+    } catch (e: any) {
+      setPushErr(e?.message || "Failed to send to SharePoint");
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
 
   return (
-    <div className="max-w-md mx-auto">
-      <header className="mb-4">
-        <h2 className="text-xl font-bold text-jet2">{flight.number}</h2>
-        <p className="text-sm text-slate-600">
-          {flight.destination} — {flight.date} — {flight.schedTime}
-        </p>
-      </header>
+    <div className="max-w-xl mx-auto p-4">
+      <div className="mb-4">
+        <Link to={`/agent/${agentId}`} className="text-jet2 underline text-sm">
+          ← Back to My Shift
+        </Link>
+      </div>
 
-      <div className="bg-white rounded shadow p-4 flex flex-col gap-3">
+      <h2 className="text-xl font-bold text-jet2 mb-1">{flight.number}</h2>
+      <div className="text-sm text-slate-600 mb-4">
+        {flight.destination} — {flight.date} — {flight.schedTime}
+      </div>
 
+      <div className="bg-white rounded shadow p-4 space-y-3">
         <TimeField label="Gate start" value={gateStart} onChange={setGateStart} />
+        <TimeField
+          label="Gate end"
+          value={gateEnd}
+          onChange={setGateEnd}
+          disabled={!gateStart}
+        />
+        <TimeField
+          label="First bus"
+          value={firstBus}
+          onChange={setFirstBus}
+          disabled={walkout}
+        />
 
-        <TimeField label="Gate end" value={gateEnd} onChange={setGateEnd} />
-        {!(!gateStart || !gateEnd || gateEnd >= gateStart) && (
-          <p className="text-xs text-orange-600 -mt-2">Gate end is before gate start.</p>
-        )}
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={walkout}
+              onChange={(e) => setWalkout(e.target.checked)}
+            />
+            Walkout to aircraft (no buses)
+          </label>
+        </div>
 
-        <TimeField label="First bus" value={firstBus} onChange={setFirstBus} disabled={walkout} />
-        <TimeField label="Last bus"  value={lastBus}  onChange={setLastBus}  disabled={walkout} />
+        <TimeField
+          label="Last bus"
+          value={lastBus}
+          onChange={setLastBus}
+          disabled={walkout}
+        />
 
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={walkout} onChange={e => setWalkout(e.target.checked)} />
-          Walkout to aircraft (no buses)
-        </label>
+        <TimeField
+          label="PRM pickup time"
+          value={prmPickup}
+          onChange={setPrmPickup}
+        />
 
-        <TimeField label="PRM pickup time" value={prmPickup} onChange={setPrmPickup} />
-
-        <div className="flex flex-col text-sm">
-          <label className="font-semibold mb-1">Boarded pax + infants</label>
+        <label className="text-sm block">
+          <span className="block font-semibold mb-1">Boarded pax + infants</span>
           <input
             type="text"
             value={paxString}
-            onChange={e => setPaxString(e.target.value)}
+            onChange={(e) => setPaxString(e.target.value)}
+            className="w-full border rounded p-2"
             placeholder="e.g. 189+1"
-            className="border rounded p-2"
           />
-          <p className="text-xs text-slate-500 mt-1">
-            Format: passengers+infants (example: <span className="font-mono">189+1</span>)
-          </p>
+          <span className="text-xs text-slate-500">
+            Format: passengers+infants (example: 189+1)
+          </span>
+        </label>
+
+        <div className="flex gap-2 mt-2">
+          <button
+            onClick={onSave}
+            disabled={!validOrder || saving}
+            className={`py-2 px-4 rounded font-semibold text-white ${
+              saved ? "bg-green-600" : saving ? "bg-slate-400" : "bg-jet2"
+            }`}
+          >
+            {saving ? "Saving…" : saved ? "Saved ✓" : "Save"}
+          </button>
+
+          <button
+            onClick={onClickSend}
+            disabled={pushBusy}
+            className="py-2 px-4 rounded font-semibold bg-slate-200 hover:bg-slate-300"
+            title="Send this entry to the SharePoint spreadsheet"
+          >
+            {pushBusy ? "Sending…" : "Send to SharePoint"}
+          </button>
         </div>
 
-        <button
-          onClick={onSave}
-          className="mt-4 bg-jet2 text-white py-2 rounded font-semibold"
-        >
-          Save
-        </button>
+        {pushOk && <p className="text-green-700 text-sm mt-2">{pushOk}</p>}
+        {pushErr && <p className="text-red-600 text-sm mt-2">{pushErr}</p>}
+
+        {/* preview of the composed comment so agent can see what will be sent */}
+        <div className="mt-3 text-xs text-slate-500">
+          <span className="font-semibold">Preview comment: </span>
+          {commentString}
+        </div>
       </div>
+
+      <GateConfirmModal
+        open={showGate}
+        gate={gate}
+        onChange={setGate}
+        onCancel={() => setShowGate(false)}
+        onConfirm={confirmSend}
+      />
     </div>
   );
 }
