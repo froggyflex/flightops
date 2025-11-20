@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useFlights } from "../../services/FlightContext";
 import { sendOperationalItem } from "../../services/sharepointAdapter";
 import TimeField  from "../../components/TimeField";
+import GateConfirmModal  from "../../components/GateConfirmModal";
 
 /* ---------- local types to keep TS happy (adjust if you already export them) ---------- */
 type AgentOps = {
@@ -32,46 +33,7 @@ type Flight = {
   remarks?: string;
 };
 
-/* ---------- small inline modal for gate confirmation ---------- */
-function GateConfirmModal({
-  open,
-  gate,
-  onChange,
-  onCancel,
-  onConfirm,
-}: {
-  open: boolean;
-  gate: string;
-  onChange: (v: string) => void;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow p-5 w-[90%] max-w-sm">
-        <h3 className="text-lg font-bold text-jet2 mb-3">Confirm gate</h3>
-        <label className="text-sm block mb-2">Gate code (e.g., A5)</label>
-        <input
-          autoFocus
-          type="text"
-          value={gate}
-          onChange={(e) => onChange(e.target.value)}
-          className="border rounded w-full p-2 mb-4"
-          placeholder="Gate..."
-        />
-        <div className="flex justify-end gap-2">
-          <button onClick={onCancel} className="px-3 py-2 rounded bg-slate-200">
-            Cancel
-          </button>
-          <button onClick={onConfirm} className="px-3 py-2 rounded bg-jet2 text-white">
-            Send
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+ 
 
 /* ---------- tiny helpers ---------- */
 const nowHHMM = () => {
@@ -117,6 +79,7 @@ export default function AgentFlightDetail() {
 
   // SharePoint push state
   const [gate, setGate] = useState("");
+  const [remark, setRemark] = useState(""); // NEW
   const [showGate, setShowGate] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushOk, setPushOk] = useState<string | null>(null);
@@ -183,7 +146,7 @@ export default function AgentFlightDetail() {
         },
         ops: { gateStart, gateEnd, firstBus, lastBus, walkout, prmPickup, paxString },
         gate,
-        remarks: (flight.remarks || "").trim() || undefined,
+        remarks: remark?.trim() || undefined,   // this triggers the extra "info" row in the sheet,
       });
 
       setPushOk("Sent to SharePoint ✓");
@@ -296,7 +259,9 @@ export default function AgentFlightDetail() {
       <GateConfirmModal
         open={showGate}
         gate={gate}
-        onChange={setGate}
+        remark={remark}
+        onChangeGate={setGate}
+        onChangeRemark={setRemark}
         onCancel={() => setShowGate(false)}
         onConfirm={confirmSend}
       />
