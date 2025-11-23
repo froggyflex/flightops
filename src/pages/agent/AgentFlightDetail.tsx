@@ -4,6 +4,7 @@ import { useFlights } from "../../services/FlightContext";
 import { sendOperationalItem } from "../../services/sharepointAdapter";
 import TimeField  from "../../components/TimeField";
 import GateConfirmModal  from "../../components/GateConfirmModal";
+import { useSpeechCapture } from '../../services/voice/useSpeechCapture';
 
 /* ---------- local types to keep TS happy (adjust if you already export them) ---------- */
 type AgentOps = {
@@ -44,9 +45,46 @@ const nowHHMM = () => {
 };
 
 export default function AgentFlightDetail() {
+
+
   const { agentId, flightId } = useParams<{ agentId: string; flightId: string }>();
   const { flights, updateAgentOps } = useFlights();
+  const { active, listening, events, error, start, stop, clear } = useSpeechCapture('en-GB');
+  const [reviewOpen, setReviewOpen] = useState(false);
 
+function applyEvent(ev: {ts:number, raw:string, parsed:any}) {
+  const p = ev.parsed;
+  if (!p) return;
+  if (p.kind === 'time') {
+    const map: Record<string, [string|null, (v:string)=>void]> = {
+      gateStart: [gateStart, setGateStart],
+      gateEnd:   [gateEnd,   setGateEnd],
+      firstBus:  [firstBus,  setFirstBus],
+      lastBus:   [lastBus,   setLastBus],
+      prmPickup: [prmPickup, setPrmPickup],
+    } as any;
+
+    const [prev, setter] = map[p.field];
+    if (prev !== p.value) {
+      setter(p.value); // overwrite silently
+      addAudit({ ts: ev.ts, source:'voice', field: p.field, from: prev, to: p.value, phrase: ev.raw });
+    }
+  } else if (p.kind === 'flag' && p.field === 'walkout') {
+    if (!walkout) addAudit({ ts: ev.ts, source:'voice', field:'walkout', from: walkout, to: true, phrase: ev.raw });
+    setWalkout(true);
+    // Clear bus times if we toggled to walkout
+    if (firstBus) addAudit({ ts: ev.ts, source:'voice', field:'firstBus', from:firstBus, to:null, phrase: ev.raw });
+    if (lastBus)  addAudit({ ts: ev.ts, source:'voice', field:'lastBus',  from:lastBus,  to:null, phrase: ev.raw });
+    setFirstBus(''); setLastBus('');
+  } else if (p.kind === 'remark') {
+    const prev = remark || '';
+    const next = prev ? `${prev}\n${p.text}` : p.text;
+    if (next !== prev) {
+      setRemark(next);
+      addAudit({ ts: ev.ts, source:'voice', field:'remark', from: prev, to: next, phrase: ev.raw });
+    }
+  }
+}
   // Find the flight
   const flight = useMemo<Flight | undefined>(
     () => flights.find((f: any) => String(f.id) === String(flightId)),
@@ -158,7 +196,32 @@ export default function AgentFlightDetail() {
     }
   };
 
+  type Audit = {
+    ts: number;
+    source: 'voice'|'manual';
+    field: 'gateStart'|'gateEnd'|'firstBus'|'lastBus'|'prmPickup'|'walkout'|'remark';
+    from?: string|boolean|null;
+    to?: string|boolean|null;
+    phrase?: string;   // raw speech text
+  };
 
+  function loadAudit(flightId: string): Audit[] {
+    try { return JSON.parse(localStorage.getItem(`audit:${flightId}`) || '[]'); } catch { return []; }
+  }
+  function saveAudit(flightId: string, items: Audit[]) {
+    localStorage.setItem(`audit:${flightId}`, JSON.stringify(items));
+  }
+
+  const [audit, setAudit] = useState<Audit[]>(() => loadAudit(flight.id));
+
+  function addAudit(entry: Audit) {
+    setAudit(prev => {
+      const next = [...prev, entry];
+      saveAudit(flight.id, next);
+      return next;
+    });
+  }
+  function applyAll() { events.forEach(applyEvent); }
   return (
     <div className="max-w-xl mx-auto p-4">
       <div className="mb-4">
@@ -171,6 +234,42 @@ export default function AgentFlightDetail() {
       <div className="text-sm text-slate-600 mb-4">
         {flight.destination} — {flight.date} — {flight.schedTime}
       </div>
+      
+      <div className="flex items-center gap-2 mb-3">
+        {!listening ? (
+          <button onClick={start} className="px-3 py-1.5 rounded bg-jet2 text-white">🎤 Start voice</button>
+        ) : (
+          <button onClick={stop} className="px-3 py-1.5 rounded bg-slate-200">■ Stop</button>
+        )}
+        
+        <button onClick={()=>setReviewOpen(true)} className="px-3 py-1.5 rounded bg-slate-100 border">
+          Review voice log ({events.length})
+        </button>
+        <button onClick={()=>{applyAll(); clear();}} className="px-3 py-1.5 rounded bg-green-600 text-white">
+          Apply all
+        </button>
+        <button onClick={clear} className="px-3 py-1.5 rounded bg-slate-100">Clear log</button>
+        {error && <span className="text-red-600 text-sm">{error}</span>}
+      </div>
+      {/* capture tray */}
+          {!!events.length && (
+            <div className="bg-white rounded shadow p-3 mb-3 text-sm">
+              <div className="font-semibold mb-2">Captured</div>
+              <ul className="space-y-2">
+                {events.slice(-6).reverse().map((e,idx)=>(
+                  <li key={idx} className="flex items-center justify-between">
+                    <span className="text-slate-600">{new Date(e.ts).toLocaleTimeString()} — “{e.raw}”</span>
+                    <span>
+                      {e.parsed?.kind==='time' && <span className="text-jet2">{e.parsed.field}: {e.parsed.value}</span>}
+                      {e.parsed?.kind==='flag' && <span className="text-jet2">walkout</span>}
+                      {e.parsed?.kind==='remark' && <span className="text-jet2">remark ✓</span>}
+                      <button className="ml-3 text-blue-600 underline" onClick={()=>applyEvent(e)}>Apply</button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
       <div className="bg-white rounded shadow p-4 space-y-3">
         <TimeField label="Gate start" value={gateStart} onChange={setGateStart} />
@@ -265,6 +364,59 @@ export default function AgentFlightDetail() {
         onCancel={() => setShowGate(false)}
         onConfirm={confirmSend}
       />
+
+       {/* review modal */}
+      {reviewOpen && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow p-5 w-[90%] max-w-lg">
+            <h3 className="text-lg font-bold text-jet2 mb-3">Voice log for {flight.number}</h3>
+            <div className="max-h-80 overflow-auto text-sm">
+              {events.map((e,i)=>(
+                <div key={i} className="py-1 border-b">
+                  <div className="text-slate-500">{new Date(e.ts).toLocaleTimeString()}</div>
+                  <div>“{e.raw}”</div>
+                  {e.parsed && <div className="text-jet2">
+                  {e.parsed?.kind==='time' && (
+                    <span className="text-jet2">
+                      {e.parsed.field}: {e.parsed.value}
+                      {/* look up previous value from state on render to mark updated */}
+                      {(e.parsed.field==='gateStart' && gateStart && gateStart!==e.parsed.value) && (
+                        <span className="ml-2 text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
+                          updated
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  </div>}
+                  <button className="text-blue-600 underline mt-1" onClick={()=>applyEvent(e)}>Apply</button>
+                </div>
+              ))}
+              
+            </div>
+            <div className="mt-4">
+              <h4 className="font-semibold mb-2">Change log</h4>
+              <div className="max-h-48 overflow-auto text-sm">
+                {audit.map((a,i)=>(
+                  <div key={i} className="py-1 border-b">
+                    <div className="text-slate-500">{new Date(a.ts).toLocaleTimeString()} • {a.source}</div>
+                    <div>
+                      <span className="font-semibold">{a.field}</span>: {String(a.from ?? '—')} → <span className="text-jet2">{String(a.to ?? '—')}</span>
+                      {a.phrase && <span className="ml-2 text-slate-500">“{a.phrase}”</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-3">
+              <button className="px-3 py-2 rounded bg-slate-200" onClick={()=>setReviewOpen(false)}>Close</button>
+              <button className="px-3 py-2 rounded bg-green-600 text-white" onClick={()=>{applyAll(); setReviewOpen(false);}}>Apply all</button>
+            </div>
+          </div>
+        </div>
+      )}
+    
     </div>
+    
   );
 }
