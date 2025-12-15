@@ -10,7 +10,7 @@ function withCORS(res) {
 }
 
 // small helper to time out fetch
-async function fetchWithTimeout(url, opts = {}, ms = 8000) {
+async function fetchWithTimeout(url, opts = {}, ms = 15000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), ms);
   try {
