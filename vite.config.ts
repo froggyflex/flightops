@@ -11,7 +11,7 @@ export default defineConfig({
         changeOrigin: true,
         secure: true,
         // route to your web-app endpoint
-        rewrite: () => `/macros/s/AKfycbzKzbL2BHiudBOwIXX1W7wU0pBZVdAswBLOVU2HgzuoM6mtIedUDUNrI3gKW_wrB7aF/exec`,
+        rewrite: () => `/macros/s/AKfycbxDKtStuDrGlzZMzQhpbnw2lEFttqSquPfqGPnqfNMajaUzNZyMO2FNl1EEvs7h95hQ/exec`,
         configure(proxy) {
           // Remove any origin headers that might confuse Apps Script
           proxy.on('proxyReq', (_proxyReq) => {
