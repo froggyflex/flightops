@@ -190,7 +190,12 @@ function applyEvent(ev: {ts:number, raw:string, parsed:any}) {
       setPushOk("Sent to SharePoint ✓");
       setTimeout(() => setPushOk(null), 2500);
     } catch (e: any) {
-      setPushErr(e?.message || "Failed to send to SharePoint");
+      const msg = String(e?.message || '');
+        if (msg.includes('504') || msg.toLowerCase().includes('timeout')) {
+          setPushErr('Sheets is slow right now. It may still have written. Please check the sheet or retry.');
+        } else {
+          setPushErr(msg || 'Failed to send');
+        }
     } finally {
       setPushBusy(false);
     }
