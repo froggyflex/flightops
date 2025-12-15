@@ -1,6 +1,6 @@
-// /api/push.cjs  (CommonJS)
+// /api/push.js  (CommonJS on Vercel)
 const SHEETS_ENDPOINT = process.env.SHEETS_ENDPOINT;
-const SHARED_SECRET   = process.env.SHARED_SECRET; // optional
+const SHARED_SECRET   = process.env.SHARED_SECRET || ''; // optional
 
 function withCORS(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,19 +10,23 @@ function withCORS(res) {
 }
 
 module.exports = async function handler(req, res) {
-  // CORS / preflight
-  if (req.method === 'OPTIONS') return withCORS(res).status(200).end();
-  if (req.method !== 'POST')    return withCORS(res).status(405).json({ ok:false, error:'Method not allowed' });
+  withCORS(res);
 
+  // CORS preflight
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST')    return res.status(405).json({ ok:false, error:'Method not allowed' });
+
+  // Optional shared secret (good to enable in production)
   if (SHARED_SECRET && req.headers['x-api-key'] !== SHARED_SECRET) {
-    return withCORS(res).status(401).json({ ok:false, error:'Unauthorized' });
+    return res.status(401).json({ ok:false, error:'Unauthorized' });
   }
 
   if (!SHEETS_ENDPOINT) {
-    return withCORS(res).status(500).json({ ok:false, error:'Missing SHEETS_ENDPOINT env var' });
+    return res.status(500).json({ ok:false, error:'Missing SHEETS_ENDPOINT env var' });
   }
 
   try {
+    // Vercel already parses JSON by default. Keep a fallback just in case.
     const payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
 
     const r = await fetch(SHEETS_ENDPOINT, {
@@ -32,10 +36,20 @@ module.exports = async function handler(req, res) {
     });
 
     const txt = await r.text();
-    let data; try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
+    let j; try { j = JSON.parse(txt); } catch { j = { ok:false, raw: txt }; }
 
-    return withCORS(res).status(r.status).json(data);
+    
+    const normalized = {
+      ok: !!j.ok,
+      logRow: j.opRow ?? j.logRow ?? j.writtenAt ?? null,
+      infoRow: j.infoRow ?? null,
+      closure: j.closure ?? null,
+      closureError: j.closureError ?? null,
+      error: j.error ?? null,
+    };
+
+    return res.status(r.ok ? 200 : 500).json(normalized);
   } catch (err) {
-    return withCORS(res).status(500).json({ ok:false, error: String(err) });
+    return res.status(500).json({ ok:false, error: String(err) });
   }
 };
